@@ -1,9 +1,8 @@
 use csv::{ReaderBuilder, Writer};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::prelude::*;
 use serde::Serialize;
 use std::{error::Error, io, process, thread::AccessError};
-use rayon::prelude::*;
-
 
 #[derive(Debug, Serialize, Clone)]
 struct Product {
@@ -25,18 +24,19 @@ fn apply_discount_pure(mut p: Product) -> Product {
     p
 }
 
-fn expensive_items(products: impl IntoIterator<Item = Product>) 
-    -> impl Iterator<Item =(String, f64)>
-{
+fn expensive_items(
+    products: impl IntoIterator<Item = Product>,
+) -> impl Iterator<Item = (String, f64)> {
     products
         .into_iter()
         .filter(|p| p.price > 100.0)
         .map(|p| (p.name, p.price * 0.9))
 }
 
-
 fn total_value(products: impl IntoIterator<Item = Product>) -> f64 {
-    products.into_iter().fold(0.0, |acc, p| acc + p.price * p.quantity as f64)
+    products
+        .into_iter()
+        .fold(0.0, |acc, p| acc + p.price * p.quantity as f64)
 }
 
 fn write_products(file_name: String, products: Vec<Product>) -> Result<(), Box<dyn Error>> {
@@ -80,47 +80,63 @@ fn read_products() -> Result<Vec<Product>, Box<dyn Error>> {
 }
 
 #[derive(Debug, Serialize, Clone)]
-struct Order { items: Vec<Product> }
+struct Order {
+    items: Vec<Product>,
+}
 
-
-
-fn all_discounted_items(orders: impl IntoIterator<Item = Order>) 
-    -> impl Iterator<Item = Product> 
-{
-    orders.into_iter()
+fn all_discounted_items(orders: impl IntoIterator<Item = Order>) -> impl Iterator<Item = Product> {
+    orders
+        .into_iter()
         .flat_map(|order| order.items)
-        .map(|mut p| { p.price *= 0.9; p })
+        .map(|mut p| {
+            p.price *= 0.9;
+            p
+        })
 }
 // Moves items out of Vecs — no cloning, no extra alloc.
 
 fn main() {
     if let Ok(products) = read_products() {
         println!("{:?}", products);
-        // 1. 
-        let discounted: Vec<Product> = products.clone()
+        // 1.
+        let discounted: Vec<Product> = products
+            .clone()
             .into_iter()
-            .map(|p| Product{
+            .map(|p| Product {
                 price: p.price * 0.9,
                 ..p
             })
             .collect();
         _ = write_products("01_into_ter_map_classic.csv".to_string(), discounted);
 
-        // 2. 
-        _ = write_products("02_impl_trait_apply.csv".to_string(), apply_discounts(products.clone()).collect());
+        // 2.
+        _ = write_products(
+            "02_impl_trait_apply.csv".to_string(),
+            apply_discounts(products.clone()).collect(),
+        );
 
         // 3.
 
-        _ = write_products("03_apply_pure.csv".to_string(), 
-            products.clone().into_iter().map(apply_discount_pure).collect()
+        _ = write_products(
+            "03_apply_pure.csv".to_string(),
+            products
+                .clone()
+                .into_iter()
+                .map(apply_discount_pure)
+                .collect(),
         );
 
         // 4. iter() + cloned()
-        _ = write_products("04_iter_cloned.csv".to_string(), 
+        _ = write_products(
+            "04_iter_cloned.csv".to_string(),
             products
                 .iter()
                 .cloned()
-                .map(|mut p|{p.price *= 0.9 ; p }).collect()
+                .map(|mut p| {
+                    p.price *= 0.9;
+                    p
+                })
+                .collect(),
         );
 
         // 5. for_each
@@ -131,19 +147,22 @@ fn main() {
 
         // 6. fold pervertion
 
-        let discounted: Vec<Product> = products.clone().into_iter()
-            .fold(Vec::new(), |mut acc, mut p|{
-                p.price *= 0.9;
-                acc.push(p);
-                acc
-            });
+        let discounted: Vec<Product> =
+            products
+                .clone()
+                .into_iter()
+                .fold(Vec::new(), |mut acc, mut p| {
+                    p.price *= 0.9;
+                    acc.push(p);
+                    acc
+                });
         _ = write_products("06_fold.csv".to_string(), discounted);
 
         // 7 Scan pervertion
         let discounted: Vec<Product> = products
             .clone()
             .into_iter()
-            .scan((), |_, mut p|{
+            .scan((), |_, mut p| {
                 p.price *= 0.9;
                 Some(p)
             })
@@ -152,17 +171,17 @@ fn main() {
 
         // 8 Conditional discount
 
-        let discounted : Vec<Product> = products
+        let discounted: Vec<Product> = products
             .clone()
             .into_iter()
-            .map(|mut p|{
+            .map(|mut p| {
                 if p.price >= 100.0 {
                     p.price *= 0.9;
                 }
                 p
             })
-            .collect(); 
-            _ = write_products("08_conditional_map.csv".to_string(), discounted);
+            .collect();
+        _ = write_products("08_conditional_map.csv".to_string(), discounted);
 
         // 9 Zip
 
@@ -172,35 +191,35 @@ fn main() {
             .clone()
             .into_iter()
             .zip(prices)
-            .map(|(mut p, new_price)|{
+            .map(|(mut p, new_price)| {
                 p.price = new_price;
                 p
             })
             .collect();
         _ = write_products("09_zip.csv".to_string(), discounted);
-        
 
         // 10 conditional impl
 
-         for (name, disc) in expensive_items(products.clone()) { 
-            println!("{} {:4.2}",  name, disc);
-         }
+        for (name, disc) in expensive_items(products.clone()) {
+            println!("{} {:4.2}", name, disc);
+        }
 
-         // 11 Total value
+        // 11 Total value
 
-         println!("Total value: {}", total_value(products.clone()));
+        println!("Total value: {}", total_value(products.clone()));
 
-        // 11 FlatMap 
+        // 11 FlatMap
 
-
-        let order = Order{
-            items: products.clone()
+        let order = Order {
+            items: products.clone(),
         };
         let orders = vec![order];
-        println!("Discounted: {:?}", all_discounted_items(orders).collect::<Vec<_>>());
+        println!(
+            "Discounted: {:?}",
+            all_discounted_items(orders).collect::<Vec<_>>()
+        );
 
         let many_products: Vec<_> = products.clone().iter().cycle().cloned().take(5).collect();
-        
 
         let part_sum: Vec<_> = many_products
             .clone()
@@ -208,13 +227,9 @@ fn main() {
             .fold(|| 0f64, |acc, p| acc + (p.price * (p.quantity as f64)))
             .collect();
 
-        let totsl_sum: f64 = part_sum
-            .into_par_iter()
-            .sum(); 
-
+        let totsl_sum: f64 = part_sum.into_par_iter().sum();
 
         println!("{:?}", &many_products);
         println!("Total sum:{}", totsl_sum);
-
     }
 }
