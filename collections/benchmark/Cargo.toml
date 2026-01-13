@@ -1,0 +1,16 @@
+[package]
+name = "benchmark"
+version = "0.1.0"
+edition = "2024"
+
+
+[dependencies]
+criterion = { version = "0.7", features = ["html_reports"] }
+
+
+[dev-dependencies]
+criterion = { version = "0.7", features = ["html_reports"] }
+ 
+[[bench]]
+name = "std_containers"
+harness = false
