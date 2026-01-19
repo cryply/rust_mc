@@ -1,0 +1,25 @@
+# Rust
+/target/
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# AWS Lambda
+.lambda/
+bootstrap
+bootstrap.zip
+
+# Environment files (contains AWS resource names)
+.env
+
+# Test outputs
+response.json
+
+# OS
+.DS_Store
+Thumbs.db
+target
