@@ -1,0 +1,9 @@
+[package]
+name = "lambda-template"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lambda_runtime = "1.0.2"
+serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1", features = ["macros"] }
