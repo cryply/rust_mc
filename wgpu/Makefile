@@ -1,20 +1,30 @@
-.PHONY: build run release clean fmt lint test all
+.PHONY: build run release clean fmt lint test all cube dodecahedron
 
 # Development build
 build:
 	cargo build
 
-# Run in development mode
-run:
-	RUST_LOG=info cargo run
+# Run cube (default)
+run: cube
+
+# Run cube
+cube:
+	RUST_LOG=info cargo run --bin cube
+
+# Run dodecahedron
+dodecahedron:
+	RUST_LOG=info cargo run --bin dodecahedron
 
 # Release build (optimized)
 release:
 	cargo build --release
 
-# Run release build
-run-release:
-	RUST_LOG=info cargo run --release
+# Run release builds
+run-cube-release:
+	RUST_LOG=info cargo run --release --bin cube
+
+run-dodecahedron-release:
+	RUST_LOG=info cargo run --release --bin dodecahedron
 
 # Format code
 fmt:

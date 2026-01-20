@@ -5,6 +5,14 @@ edition = "2021"
 authors = ["Sir John The One"]
 description = "A simple 3D rotating cube using wgpu"
 
+[[bin]]
+name = "cube"
+path = "src/main.rs"
+
+[[bin]]
+name = "dodecahedron"
+path = "src/bin/dodecahedron.rs"
+
 [dependencies]
 wgpu = "28.0.0"
 winit = "0.30"
