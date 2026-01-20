@@ -571,7 +571,6 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     let world_pos = uniforms.model * vec4<f32>(in.position, 1.0);
     out.world_pos = world_pos.xyz;
     
-    // Transform normal to world space (using normal matrix approximation)
     let normal_matrix = mat3x3<f32>(
         uniforms.model[0].xyz,
         uniforms.model[1].xyz,
@@ -586,10 +585,7 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     var normal = normalize(in.world_normal);
-    let light_pos = uniforms.light_pos.xyz;
     let view_pos = uniforms.view_pos.xyz;
-    
-    // View direction
     let view_dir = normalize(view_pos - in.world_pos);
     
     // Check if back face and flip normal
@@ -598,66 +594,55 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         normal = -normal;
     }
     
-    // Light color (warm white)
-    let light_color = vec3<f32>(1.0, 0.98, 0.95);
+    // Emerald color
+    let emerald = uniforms.diffuse.rgb;
     
-    // Light direction
-    let light_dir = normalize(light_pos - in.world_pos);
+    // Main directional light from upper right
+    let light_dir = normalize(vec3<f32>(1.0, 1.0, 0.8));
+    let light_color = vec3<f32>(1.0, 1.0, 0.95);
     
-    // Fresnel effect - edges more reflective (Schlick approximation)
-    let fresnel_base = 0.04;
-    let fresnel = fresnel_base + (1.0 - fresnel_base) * pow(1.0 - max(dot(normal, view_dir), 0.0), 5.0);
+    // Diffuse (Lambert)
+    let n_dot_l = max(dot(normal, light_dir), 0.0);
+    let diffuse = n_dot_l * emerald * light_color;
     
-    // Ambient - deeper color for gem interior
-    let ambient = uniforms.ambient.rgb * 0.3;
+    // Subsurface scattering approximation for gem
+    let subsurface = max(-dot(normal, light_dir), 0.0) * emerald * 0.3;
     
-    // Diffuse with subsurface scattering approximation
-    let n_dot_l = dot(normal, light_dir);
-    let diff_front = max(n_dot_l, 0.0);
-    // Fake subsurface: light wraps around
-    let diff_back = max(-n_dot_l, 0.0) * 0.4;
-    let diffuse = (diff_front + diff_back) * uniforms.diffuse.rgb * light_color;
+    // Specular (Blinn-Phong)
+    let halfway = normalize(light_dir + view_dir);
+    let n_dot_h = max(dot(normal, halfway), 0.0);
+    let spec = pow(n_dot_h, uniforms.shininess);
+    let specular = spec * uniforms.specular.rgb * light_color;
     
-    // Specular (Blinn-Phong) - sharp highlights
-    let halfway_dir = normalize(light_dir + view_dir);
-    let spec = pow(max(dot(normal, halfway_dir), 0.0), uniforms.shininess * 2.0);
-    let specular = spec * uniforms.specular.rgb * light_color * 1.5;
+    // Secondary light from lower left (cooler, dimmer)
+    let light2_dir = normalize(vec3<f32>(-0.8, -0.5, 0.5));
+    let light2_color = vec3<f32>(0.4, 0.6, 0.5);
+    let n_dot_l2 = max(dot(normal, light2_dir), 0.0);
+    let diffuse2 = n_dot_l2 * emerald * light2_color * 0.4;
     
-    // Secondary specular for gem facets
-    let spec2 = pow(max(dot(normal, halfway_dir), 0.0), uniforms.shininess * 0.5);
-    let specular2 = spec2 * uniforms.specular.rgb * 0.3;
+    // Fresnel rim for gem edges
+    let fresnel = pow(1.0 - max(dot(normal, view_dir), 0.0), 4.0);
+    let rim = fresnel * emerald * 0.5;
     
-    // Rim lighting (backlit glow effect)
-    let rim_strength = pow(1.0 - max(dot(normal, view_dir), 0.0), 3.0);
-    let rim = rim_strength * uniforms.diffuse.rgb * 0.6;
-    
-    // Internal glow - simulate light bouncing inside
-    let internal_glow = uniforms.diffuse.rgb * 0.1;
-    
-    // Back faces are darker and more saturated (looking into gem)
+    // Back faces darker (looking into gem depth)
     var color_mult = 1.0;
     if (is_back_face) {
-        color_mult = 0.6;
+        color_mult = 0.5;
     }
     
-    // Combine all lighting
-    let lit_color = (ambient + diffuse + specular + specular2 + rim + internal_glow) * color_mult;
+    // NO AMBIENT - only directional lights
+    var color = (diffuse + subsurface + specular + diffuse2 + rim) * color_mult;
     
-    // Tone mapping (ACES-like)
-    let a = 2.51;
-    let b = 0.03;
-    let c = 2.43;
-    let d = 0.59;
-    let e = 0.14;
-    let mapped = clamp((lit_color * (a * lit_color + b)) / (lit_color * (c * lit_color + d) + e), vec3(0.0), vec3(1.0));
+    // Tone mapping
+    color = color / (color + vec3<f32>(1.0));
     
-    // Alpha: very transparent, edges slightly more opaque
-    var alpha = 0.35 + fresnel * 0.2;
+    // Alpha: transparent gem
+    var alpha = 0.4 + fresnel * 0.25;
     if (is_back_face) {
-        alpha = 0.25;  // Back faces even more transparent
+        alpha = 0.25;
     }
     
-    return vec4<f32>(mapped, alpha);
+    return vec4<f32>(color, alpha);
 }
 "#;
 
