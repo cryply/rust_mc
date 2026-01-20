@@ -154,11 +154,11 @@ impl Uniforms {
             proj: Mat4::IDENTITY.to_cols_array_2d(),
             light_pos: [3.0, 3.0, 3.0, 1.0],
             view_pos: [0.0, 0.0, 4.0, 1.0],
-            // Emerald material (classic OpenGL emerald)
-            ambient: [0.0215, 0.1745, 0.0215, 1.0],
-            diffuse: [0.07568, 0.61424, 0.07568, 1.0],
-            specular: [0.633, 0.727811, 0.633, 1.0],
-            shininess: 76.8,
+            // Vibrant emerald material
+            ambient: [0.05, 0.25, 0.08, 1.0],
+            diffuse: [0.1, 0.75, 0.2, 1.0],
+            specular: [0.9, 1.0, 0.9, 1.0],
+            shininess: 96.0,
             _padding: [0.0; 3],
         }
     }
@@ -176,8 +176,8 @@ impl Uniforms {
         
         self.view_pos = [eye.x, eye.y, eye.z, 1.0];
         
-        // Light source behind and above the camera
-        self.light_pos = [0.0, 2.0, 6.0, 1.0];
+        // Light source behind camera, shifted to the right
+        self.light_pos = [4.0, 2.0, 6.0, 1.0];
     }
 }
 
@@ -310,7 +310,18 @@ impl State {
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::SrcAlpha,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                    }),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -319,7 +330,7 @@ impl State {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
+                cull_mode: None,  // Render both sides for transparency
                 polygon_mode: wgpu::PolygonMode::Fill,
                 unclipped_depth: false,
                 conservative: false,
@@ -433,9 +444,9 @@ impl State {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.02,
-                            g: 0.02,
-                            b: 0.05,
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.0,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -574,37 +585,79 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let normal = normalize(in.world_normal);
+    var normal = normalize(in.world_normal);
     let light_pos = uniforms.light_pos.xyz;
     let view_pos = uniforms.view_pos.xyz;
     
-    // Light color (warm white)
-    let light_color = vec3<f32>(1.0, 0.95, 0.9);
-    
-    // Ambient
-    let ambient = uniforms.ambient.rgb * light_color * 0.3;
-    
-    // Diffuse
-    let light_dir = normalize(light_pos - in.world_pos);
-    let diff = max(dot(normal, light_dir), 0.0);
-    let diffuse = diff * uniforms.diffuse.rgb * light_color;
-    
-    // Specular (Blinn-Phong)
+    // View direction
     let view_dir = normalize(view_pos - in.world_pos);
+    
+    // Check if back face and flip normal
+    let is_back_face = dot(normal, view_dir) < 0.0;
+    if (is_back_face) {
+        normal = -normal;
+    }
+    
+    // Light color (warm white)
+    let light_color = vec3<f32>(1.0, 0.98, 0.95);
+    
+    // Light direction
+    let light_dir = normalize(light_pos - in.world_pos);
+    
+    // Fresnel effect - edges more reflective (Schlick approximation)
+    let fresnel_base = 0.04;
+    let fresnel = fresnel_base + (1.0 - fresnel_base) * pow(1.0 - max(dot(normal, view_dir), 0.0), 5.0);
+    
+    // Ambient - deeper color for gem interior
+    let ambient = uniforms.ambient.rgb * 0.3;
+    
+    // Diffuse with subsurface scattering approximation
+    let n_dot_l = dot(normal, light_dir);
+    let diff_front = max(n_dot_l, 0.0);
+    // Fake subsurface: light wraps around
+    let diff_back = max(-n_dot_l, 0.0) * 0.4;
+    let diffuse = (diff_front + diff_back) * uniforms.diffuse.rgb * light_color;
+    
+    // Specular (Blinn-Phong) - sharp highlights
     let halfway_dir = normalize(light_dir + view_dir);
-    let spec = pow(max(dot(normal, halfway_dir), 0.0), uniforms.shininess);
-    let specular = spec * uniforms.specular.rgb * light_color;
+    let spec = pow(max(dot(normal, halfway_dir), 0.0), uniforms.shininess * 2.0);
+    let specular = spec * uniforms.specular.rgb * light_color * 1.5;
     
-    // Add slight fresnel effect for gem-like appearance
-    let fresnel = pow(1.0 - max(dot(normal, view_dir), 0.0), 3.0);
-    let rim = fresnel * uniforms.specular.rgb * 0.3;
+    // Secondary specular for gem facets
+    let spec2 = pow(max(dot(normal, halfway_dir), 0.0), uniforms.shininess * 0.5);
+    let specular2 = spec2 * uniforms.specular.rgb * 0.3;
     
-    let result = ambient + diffuse + specular + rim;
+    // Rim lighting (backlit glow effect)
+    let rim_strength = pow(1.0 - max(dot(normal, view_dir), 0.0), 3.0);
+    let rim = rim_strength * uniforms.diffuse.rgb * 0.6;
     
-    // Tone mapping
-    let mapped = result / (result + vec3<f32>(1.0));
+    // Internal glow - simulate light bouncing inside
+    let internal_glow = uniforms.diffuse.rgb * 0.1;
     
-    return vec4<f32>(mapped, 1.0);
+    // Back faces are darker and more saturated (looking into gem)
+    var color_mult = 1.0;
+    if (is_back_face) {
+        color_mult = 0.6;
+    }
+    
+    // Combine all lighting
+    let lit_color = (ambient + diffuse + specular + specular2 + rim + internal_glow) * color_mult;
+    
+    // Tone mapping (ACES-like)
+    let a = 2.51;
+    let b = 0.03;
+    let c = 2.43;
+    let d = 0.59;
+    let e = 0.14;
+    let mapped = clamp((lit_color * (a * lit_color + b)) / (lit_color * (c * lit_color + d) + e), vec3(0.0), vec3(1.0));
+    
+    // Alpha: very transparent, edges slightly more opaque
+    var alpha = 0.35 + fresnel * 0.2;
+    if (is_back_face) {
+        alpha = 0.25;  // Back faces even more transparent
+    }
+    
+    return vec4<f32>(mapped, alpha);
 }
 "#;
 
