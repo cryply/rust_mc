@@ -1,4 +1,4 @@
-.PHONY: build run release clean fmt lint test all cube dodecahedron
+.PHONY: build run release clean fmt lint test all cube dodecahedron ring
 
 # Development build
 build:
@@ -15,6 +15,10 @@ cube:
 dodecahedron:
 	RUST_LOG=info cargo run --bin dodecahedron
 
+# Run golden ring
+ring:
+	RUST_LOG=info cargo run --bin ring
+
 # Release build (optimized)
 release:
 	cargo build --release
@@ -25,6 +29,9 @@ run-cube-release:
 
 run-dodecahedron-release:
 	RUST_LOG=info cargo run --release --bin dodecahedron
+
+run-ring-release:
+	RUST_LOG=info cargo run --release --bin ring
 
 # Format code
 fmt:
