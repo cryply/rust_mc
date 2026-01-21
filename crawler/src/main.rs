@@ -88,8 +88,17 @@ impl Storage {
                     request = request.content_type(ct);
                 }
                 
-                request.send().await?;
-                Ok(())
+                match request.send().await {
+                    Ok(_) => {
+                        println!("Successfully uploaded: {}", key);
+                        Ok(())
+                    }
+                    Err(e) => {
+                        eprintln!("S3 upload error: {:?}", e);
+                        eprintln!("Raw error: {:#?}", e.raw_response());
+                        Err(e.into())
+                    }
+                }
             }
         }
     }
