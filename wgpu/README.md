@@ -5,6 +5,8 @@ A simple 3D rotating cube demo using **wgpu** (WebGPU/Vulkan) in Rust.
 
 <img width="653" height="522" alt="image" src="https://github.com/user-attachments/assets/ba4fc7f4-3170-4ce5-90bd-e970c09b42d0" />
 
+<img width="646" height="522" alt="image" src="https://github.com/user-attachments/assets/b777ec9c-46b1-4d61-ad56-b2287c96f0b1" />
+
 
 ## Features
 
