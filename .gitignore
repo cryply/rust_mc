@@ -1,6 +1,8 @@
 target/
 .env
+.venv
 aws/efs-lister/efs-policy.json
 aws/efs-lister/response.json
 aws/efs-lister/trust-policy.json
 data/
+

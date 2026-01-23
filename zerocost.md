@@ -44,7 +44,7 @@
 7. skip_while()
 8. take() // yield first n elements, returns Iterator(range)
 9. step_by()
-10. min(), max()
+10. min(), max() //itertools
 11. find() // first element
 12. position()
 13. last()
