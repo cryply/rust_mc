@@ -6,3 +6,4 @@ aws/efs-lister/response.json
 aws/efs-lister/trust-policy.json
 data/
 
+dataframes/jupyter/fruits.csv
