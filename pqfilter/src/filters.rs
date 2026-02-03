@@ -132,10 +132,7 @@ impl FilterSpec {
             }
 
             FilterOperator::StartsWith => {
-                let val = self
-                    .value
-                    .as_ref()
-                    .context("'startswith' requires a value")?;
+                let val = self.value.as_ref().context("'startswith' requires a value")?;
                 c.str().starts_with(lit(val.clone()))
             }
 
@@ -190,20 +187,23 @@ impl FilterSpec {
     where
         F: FnOnce(Expr, Expr) -> Expr,
     {
-        // Try parsing as different types
-        if let Ok(v) = val.parse::<i64>() {
-            return Ok(compare_fn(c, lit(v)));
-        }
-        if let Ok(v) = val.parse::<f64>() {
-            return Ok(compare_fn(c, lit(v)));
-        }
+        // Try parsing as different types - Polars will handle type coercion
         if val.eq_ignore_ascii_case("true") {
             return Ok(compare_fn(c, lit(true)));
         }
         if val.eq_ignore_ascii_case("false") {
             return Ok(compare_fn(c, lit(false)));
         }
-
+        // Try integer first - use Scalar to construct the literal
+        if let Ok(v) = val.parse::<i64>() {
+            let scalar = Scalar::new(DataType::Int64, AnyValue::Int64(v));
+            return Ok(compare_fn(c, lit(scalar)));
+        }
+        // Try float
+        if let Ok(v) = val.parse::<f64>() {
+            let scalar = Scalar::new(DataType::Float64, AnyValue::Float64(v));
+            return Ok(compare_fn(c, lit(scalar)));
+        }
         // Fall back to string comparison
         Ok(compare_fn(c, lit(val.to_string())))
     }

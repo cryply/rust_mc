@@ -83,7 +83,7 @@ demo: sample release
 	cat agg.json | .venv/bin/python -m json.tool 2>/dev/null || cat agg.json
 	
 	@echo "\n=== Sort by score descending ==="
-	./target/release/pqfilter sort -i sample.parquet -o sorted.parquet -b "-score"
+	./target/release/pqfilter sort -i sample.parquet -o sorted.parquet --by="-score"
 	./target/release/pqfilter info -i sorted.parquet --head 5
 	
 	@echo "\n=== Sample 10 rows ==="
