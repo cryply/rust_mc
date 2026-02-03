@@ -80,9 +80,8 @@ async fn test_fetch_with_concurrency_limit() {
         .map(|id| format!("https://jsonplaceholder.typicode.com/users/{}", id))
         .collect();
 
-    let results: Vec<Result<User, ApiError>> = aggregator
-        .fetch_with_concurrency_limit(urls, 2)
-        .await;
+    let results: Vec<Result<User, ApiError>> =
+        aggregator.fetch_with_concurrency_limit(urls, 2).await;
 
     assert_eq!(results.len(), 5);
 
