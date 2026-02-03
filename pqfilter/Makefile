@@ -64,8 +64,7 @@ demo: sample release
 	./target/release/pqfilter info -i filtered.parquet --head 5
 	
 	@echo "\n=== Filter: active users in Engineering ==="
-	./target/release/pqfilter filter -i sample.parquet -o active_eng.parquet \
-		-f "status:eq:active" -f "department:eq:Engineering"
+	./target/release/pqfilter filter -i sample.parquet -o active_eng.parquet -f "status:eq:active" -f "department:eq:Engineering"
 	./target/release/pqfilter info -i active_eng.parquet --head 5
 	
 	@echo "\n=== Select columns ==="
@@ -73,13 +72,11 @@ demo: sample release
 	head -10 selected.csv
 	
 	@echo "\n=== Transform: uppercase names ==="
-	./target/release/pqfilter transform -i sample.parquet -o transformed.parquet \
-		-t "name:uppercase" -t "score:round:0"
+	./target/release/pqfilter transform -i sample.parquet -o transformed.parquet -t "name:uppercase" -t "score:round:0"
 	./target/release/pqfilter info -i transformed.parquet --head 5
 	
 	@echo "\n=== Aggregate by department ==="
-	./target/release/pqfilter aggregate -i sample.parquet -o agg.json \
-		-g department -a "age:mean" -a "score:sum" -a "id:count"
+	./target/release/pqfilter aggregate -i sample.parquet -o agg.json -g department -a "age:mean" -a "score:sum" -a "id:count"
 	cat agg.json | .venv/bin/python -m json.tool 2>/dev/null || cat agg.json
 	
 	@echo "\n=== Sort by score descending ==="
