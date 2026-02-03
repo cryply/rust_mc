@@ -132,7 +132,10 @@ impl FilterSpec {
             }
 
             FilterOperator::StartsWith => {
-                let val = self.value.as_ref().context("'startswith' requires a value")?;
+                let val = self
+                    .value
+                    .as_ref()
+                    .context("'startswith' requires a value")?;
                 c.str().starts_with(lit(val.clone()))
             }
 
