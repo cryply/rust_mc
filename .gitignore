@@ -7,3 +7,5 @@ aws/efs-lister/trust-policy.json
 data/
 
 dataframes/jupyter/fruits.csv
+pqfilter/*.parquet
+pqfilter/*.csv
