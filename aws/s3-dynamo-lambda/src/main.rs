@@ -1,15 +1,24 @@
+// src/main.rs
+
 use lambda_runtime::{run, service_fn, Error};
 use s3_dynamo_lambda::function_handler;
-use tracing::info;
+use log::LevelFilter; // Import logging level
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .with_target(false)
-        .without_time()
+    // Initialize env_logger.
+    // Setting the filter to Info will show everything up to INFO level.
+    // AWS Lambda often picks up logs from stdout/stderr automatically.
+    env_logger::builder()
+        .filter_level(LevelFilter::Info)
+        // Crucially, disable the default timestamp and target fields if the runtime adds them back.
+        .format_timestamp(None)
+        .format_target(false)
         .init();
 
-    info!("Starting S3-DynamoDB Lambda function");
+    // The lambda_runtime function usually prints start/end messages automatically.
+    // The START/END lines you see are likely from the runtime wrapper itself.
+    // We only control what happens *inside* function_handler.
+
     run(service_fn(function_handler)).await
 }

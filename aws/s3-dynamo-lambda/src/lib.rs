@@ -7,7 +7,14 @@ use lambda_runtime::{Error, LambdaEvent};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
-use tracing::{error, info};
+use log::*; // Import logging level
+
+
+macro_rules! log_error {
+    ($($arg:tt)*) => {
+        eprintln!("[ERROR] {}", format!($($arg)*));
+    };
+}
 
 // ============================================================================
 // Error Types
@@ -156,11 +163,7 @@ impl Response {
 
     /// Create a success response
     #[must_use]
-    pub fn success(
-        request_id: String,
-        results_location: String,
-        details: ProcessingResults,
-    ) -> Self {
+    pub fn success(request_id: String, results_location: String, details: ProcessingResults) -> Self {
         Self {
             request_id,
             success: true,
@@ -199,7 +202,7 @@ pub async fn create_test_csv(file_path: &str) -> Result<(), LambdaError> {
     let content = "id,name,value\n1,item1,100\n2,item2,200\n3,item3,300\n";
 
     tokio::fs::write(file_path, content).await.map_err(|e| {
-        error!("Failed to create test file {file_path}: {e}");
+        log_error!("Failed to create test file {file_path}: {e}");
         LambdaError::FileRead(format!("Failed to create test file: {e}"))
     })?;
 
@@ -222,7 +225,7 @@ pub async fn upload_csv_to_s3(
 
     // Read file contents
     let file_bytes = tokio::fs::read(file_path).await.map_err(|e| {
-        error!("Failed to read file {file_path}: {e}");
+        log_error!("Failed to read file {file_path}: {e}");
         LambdaError::FileRead(format!("{file_path}: {e}"))
     })?;
 
@@ -242,7 +245,7 @@ pub async fn upload_csv_to_s3(
         .send()
         .await
         .map_err(|e| {
-            error!("S3 upload failed: {}", e);
+            log_error!("S3 upload failed: {}", e);
             LambdaError::S3Upload(e.to_string())
         })?;
 
@@ -264,7 +267,7 @@ pub async fn save_results_to_s3(
     info!("Saving results to s3://{}/{}", bucket, key);
 
     let json = serde_json::to_string_pretty(results).map_err(|e| {
-        error!("Failed to serialize results: {}", e);
+        log_error!("Failed to serialize results: {}", e);
         LambdaError::Serialization(e.to_string())
     })?;
 
@@ -279,7 +282,7 @@ pub async fn save_results_to_s3(
         .send()
         .await
         .map_err(|e| {
-            error!("Failed to save results to S3: {}", e);
+            log_error!("Failed to save results to S3: {}", e);
             LambdaError::S3Upload(e.to_string())
         })?;
 
@@ -345,7 +348,7 @@ pub async fn query_dynamo_item(
     }
 
     let result = key_builder.send().await.map_err(|e| {
-        error!("DynamoDB query failed: {}", e);
+        log_error!("DynamoDB query failed: {}", e);
         LambdaError::DynamoQuery(e.to_string())
     })?;
 
@@ -439,7 +442,7 @@ pub async fn function_handler(event: LambdaEvent<Request>) -> Result<Response, E
     // Optional: Create test file for testing purposes
     if payload.create_test_file {
         if let Err(e) = create_test_csv(&payload.csv_file_path).await {
-            error!("Failed to create test file: {e}");
+            log_error!("Failed to create test file: {e}");
             return Ok(Response::error(
                 request_id,
                 format!("Failed to create test file: {e}"),
@@ -453,11 +456,8 @@ pub async fn function_handler(event: LambdaEvent<Request>) -> Result<Response, E
     let csv_upload_result = match step_upload_csv(&s3_client, &payload).await {
         Ok(result) => result,
         Err(e) => {
-            error!("CSV upload failed: {e}");
-            return Ok(Response::error(
-                request_id,
-                format!("CSV upload failed: {e}"),
-            ));
+            log_error!("CSV upload failed: {e}");
+            return Ok(Response::error(request_id, format!("CSV upload failed: {e}")));
         }
     };
 
@@ -465,7 +465,7 @@ pub async fn function_handler(event: LambdaEvent<Request>) -> Result<Response, E
     let dynamo_result = match step_query_dynamo(&dynamo_client, &payload).await {
         Ok(result) => result,
         Err(e) => {
-            error!("DynamoDB query failed: {e}");
+            log_error!("DynamoDB query failed: {e}");
             return Ok(Response::error(
                 request_id,
                 format!("DynamoDB query failed: {e}"),
@@ -490,7 +490,7 @@ pub async fn function_handler(event: LambdaEvent<Request>) -> Result<Response, E
     )
     .await
     {
-        error!("Failed to save results: {e}");
+        log_error!("Failed to save results: {e}");
         return Ok(Response::error_with_details(
             request_id,
             format!("Failed to save results to S3: {e}"),
