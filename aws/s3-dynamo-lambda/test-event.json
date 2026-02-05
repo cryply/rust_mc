@@ -1,0 +1,9 @@
+{
+  "csv_file_path": "/tmp/test-data.csv",
+  "s3_bucket": "your-test-bucket",
+  "s3_csv_key": "uploads/test-data.csv",
+  "s3_results_key": "results/output.json",
+  "dynamo_table": "your-test-table",
+  "partition_key_name": "pk",
+  "partition_key_value": "user123"
+}
