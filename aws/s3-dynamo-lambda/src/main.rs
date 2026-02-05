@@ -66,6 +66,10 @@ pub struct Request {
     /// Optional: Sort key value
     #[serde(default)]
     pub sort_key_value: Option<String>,
+
+    /// Optional: Create a test CSV file if it doesn't exist (for testing)
+    #[serde(default)]
+    pub create_test_file: bool,
 }
 
 impl Request {
@@ -175,6 +179,21 @@ async fn init_aws_clients() -> (S3Client, DynamoClient) {
 // ============================================================================
 // S3 Operations
 // ============================================================================
+
+/// Create a test CSV file for testing purposes
+async fn create_test_csv(file_path: &str) -> Result<(), LambdaError> {
+    info!("Creating test CSV file at {}", file_path);
+    
+    let content = "id,name,value\n1,item1,100\n2,item2,200\n3,item3,300\n";
+    
+    tokio::fs::write(file_path, content).await.map_err(|e| {
+        error!("Failed to create test file {file_path}: {e}");
+        LambdaError::FileRead(format!("Failed to create test file: {e}"))
+    })?;
+    
+    info!("Test CSV file created successfully");
+    Ok(())
+}
 
 /// Upload a local file to S3
 async fn upload_csv_to_s3(
@@ -327,10 +346,7 @@ async fn query_dynamo_item(
 // ============================================================================
 
 /// Step 1: Upload CSV to S3 and build result
-async fn step_upload_csv(
-    s3_client: &S3Client,
-    payload: &Request,
-) -> Result<CsvUploadResult, String> {
+async fn step_upload_csv(s3_client: &S3Client, payload: &Request) -> Result<CsvUploadResult, String> {
     upload_csv_to_s3(
         s3_client,
         &payload.csv_file_path,
@@ -384,6 +400,14 @@ async fn function_handler(event: LambdaEvent<Request>) -> Result<Response, Error
     info!("S3 bucket: {}", payload.s3_bucket);
     info!("DynamoDB table: {}", payload.dynamo_table);
 
+    // Optional: Create test file for testing purposes
+    if payload.create_test_file {
+        if let Err(e) = create_test_csv(&payload.csv_file_path).await {
+            error!("Failed to create test file: {e}");
+            return Ok(Response::error(request_id, format!("Failed to create test file: {e}")));
+        }
+    }
+
     let (s3_client, dynamo_client) = init_aws_clients().await;
 
     // Step 1: Upload CSV to S3
@@ -391,10 +415,7 @@ async fn function_handler(event: LambdaEvent<Request>) -> Result<Response, Error
         Ok(result) => result,
         Err(e) => {
             error!("CSV upload failed: {e}");
-            return Ok(Response::error(
-                request_id,
-                format!("CSV upload failed: {e}"),
-            ));
+            return Ok(Response::error(request_id, format!("CSV upload failed: {e}")));
         }
     };
 
@@ -403,10 +424,7 @@ async fn function_handler(event: LambdaEvent<Request>) -> Result<Response, Error
         Ok(result) => result,
         Err(e) => {
             error!("DynamoDB query failed: {e}");
-            return Ok(Response::error(
-                request_id,
-                format!("DynamoDB query failed: {e}"),
-            ));
+            return Ok(Response::error(request_id, format!("DynamoDB query failed: {e}")));
         }
     };
 
@@ -436,11 +454,7 @@ async fn function_handler(event: LambdaEvent<Request>) -> Result<Response, Error
     }
 
     info!("All operations completed successfully");
-    Ok(Response::success(
-        request_id,
-        results_location,
-        processing_results,
-    ))
+    Ok(Response::success(request_id, results_location, processing_results))
 }
 
 // ============================================================================

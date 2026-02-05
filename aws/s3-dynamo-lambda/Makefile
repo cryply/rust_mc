@@ -7,8 +7,9 @@ REGION := eu-west-1
 ARCH := arm64
 
 # S3 and DynamoDB settings for testing
-TEST_BUCKET := your-test-bucket
-TEST_TABLE := your-test-table
+# Update these with your own unique names
+TEST_BUCKET := $(USER)-lambda-test-$(REGION)
+TEST_TABLE := $(USER)-lambda-test-table
 TEST_PK_NAME := pk
 TEST_PK_VALUE := test-key
 
@@ -60,23 +61,12 @@ deploy-with-role: release
 invoke-local:
 	cargo lambda invoke --data-file events/test-event.json
 
-# Invoke deployed Lambda via AWS CLI
+# Invoke deployed Lambda via AWS CLI (requires file to exist in Lambda environment)
+# NOTE: /tmp/test-data.csv must exist IN THE LAMBDA, not locally
 invoke:
-	@echo "Creating test CSV file..."
-	@echo "id,name,value" > /tmp/test-data.csv
-	@echo "1,item1,100" >> /tmp/test-data.csv
-	@echo "2,item2,200" >> /tmp/test-data.csv
 	aws lambda invoke \
 		--function-name $(FUNCTION_NAME) \
-		--payload '{ \
-			"csv_file_path": "/tmp/test-data.csv", \
-			"s3_bucket": "$(TEST_BUCKET)", \
-			"s3_csv_key": "uploads/test-data.csv", \
-			"s3_results_key": "results/output.json", \
-			"dynamo_table": "$(TEST_TABLE)", \
-			"partition_key_name": "$(TEST_PK_NAME)", \
-			"partition_key_value": "$(TEST_PK_VALUE)" \
-		}' \
+		--payload '{"csv_file_path":"/tmp/test-data.csv","s3_bucket":"$(TEST_BUCKET)","s3_csv_key":"uploads/test-data.csv","s3_results_key":"results/output.json","dynamo_table":"$(TEST_TABLE)","partition_key_name":"$(TEST_PK_NAME)","partition_key_value":"$(TEST_PK_VALUE)"}' \
 		--cli-binary-format raw-in-base64-out \
 		--region $(REGION) \
 		--output json \
@@ -84,21 +74,46 @@ invoke:
 	@echo "\n=== Response ==="
 	@cat response.json | jq .
 
+# Invoke with auto-created test file (for testing without EFS)
+invoke-test:
+	aws lambda invoke \
+		--function-name $(FUNCTION_NAME) \
+		--payload '{"csv_file_path":"/tmp/test-data.csv","s3_bucket":"$(TEST_BUCKET)","s3_csv_key":"uploads/test-data.csv","s3_results_key":"results/output.json","dynamo_table":"$(TEST_TABLE)","partition_key_name":"$(TEST_PK_NAME)","partition_key_value":"$(TEST_PK_VALUE)","create_test_file":true}' \
+		--cli-binary-format raw-in-base64-out \
+		--region $(REGION) \
+		--output json \
+		response.json
+	@echo "\n=== Response ==="
+	@cat response.json | jq .
+
+# Invoke using EFS-mounted file (recommended for production)
+invoke-efs:
+	aws lambda invoke \
+		--function-name $(FUNCTION_NAME) \
+		--payload '{"csv_file_path":"/mnt/efs/test-data.csv","s3_bucket":"$(TEST_BUCKET)","s3_csv_key":"uploads/test-data.csv","s3_results_key":"results/output.json","dynamo_table":"$(TEST_TABLE)","partition_key_name":"$(TEST_PK_NAME)","partition_key_value":"$(TEST_PK_VALUE)"}' \
+		--cli-binary-format raw-in-base64-out \
+		--region $(REGION) \
+		--output json \
+		response.json
+	@echo "\n=== Response ==="
+	@cat response.json | jq .
+
+# Create a test CSV on EFS (run this first if using invoke-efs)
+create-test-csv:
+	@echo "Creating test CSV on EFS via Lambda..."
+	aws lambda invoke \
+		--function-name efs-lister \
+		--payload '{"name": "create-csv"}' \
+		--cli-binary-format raw-in-base64-out \
+		--region $(REGION) \
+		response.json
+	@echo "Note: You may need a helper Lambda or direct EFS access to create the test file"
+
 # Invoke with sort key
 invoke-composite:
 	aws lambda invoke \
 		--function-name $(FUNCTION_NAME) \
-		--payload '{ \
-			"csv_file_path": "/mnt/efs/data.csv", \
-			"s3_bucket": "$(TEST_BUCKET)", \
-			"s3_csv_key": "uploads/data.csv", \
-			"s3_results_key": "results/output.json", \
-			"dynamo_table": "$(TEST_TABLE)", \
-			"partition_key_name": "pk", \
-			"partition_key_value": "user123", \
-			"sort_key_name": "sk", \
-			"sort_key_value": "order456" \
-		}' \
+		--payload '{"csv_file_path":"/mnt/efs/data.csv","s3_bucket":"$(TEST_BUCKET)","s3_csv_key":"uploads/data.csv","s3_results_key":"results/output.json","dynamo_table":"$(TEST_TABLE)","partition_key_name":"pk","partition_key_value":"user123","sort_key_name":"sk","sort_key_value":"order456"}' \
 		--cli-binary-format raw-in-base64-out \
 		--region $(REGION) \
 		--output json \
@@ -123,32 +138,75 @@ test-verbose:
 	cargo test -- --nocapture
 
 # ============================================================================
-# AWS Resource Setup (helpers)
+# AWS Resource Setup
 # ============================================================================
 
-# Create S3 bucket for testing
-create-bucket:
-	aws s3 mb s3://$(TEST_BUCKET) --region $(REGION)
+# Create all test resources (bucket, table, test item, IAM permissions)
+setup: create-bucket create-table put-test-item setup-iam
+	@echo "✅ All test resources created"
 
-# Create DynamoDB table for testing
+# Setup IAM permissions for Lambda to access S3 and DynamoDB
+setup-iam:
+	@echo "Configuring IAM permissions for Lambda..."
+	@ROLE_ARN=$$(aws lambda get-function-configuration \
+		--function-name $(FUNCTION_NAME) \
+		--region $(REGION) \
+		--query 'Role' --output text 2>/dev/null) && \
+	ROLE_NAME=$$(echo $$ROLE_ARN | cut -d'/' -f2) && \
+	echo "Role: $$ROLE_NAME" && \
+	aws iam attach-role-policy \
+		--role-name $$ROLE_NAME \
+		--policy-arn arn:aws:iam::aws:policy/AmazonS3FullAccess 2>/dev/null || true && \
+	aws iam attach-role-policy \
+		--role-name $$ROLE_NAME \
+		--policy-arn arn:aws:iam::aws:policy/AmazonDynamoDBReadOnlyAccess 2>/dev/null || true && \
+	echo "✅ IAM policies attached (waiting for propagation...)" && \
+	sleep 5
+
+# Create S3 bucket (ignores error if already exists)
+create-bucket:
+	@echo "Creating S3 bucket $(TEST_BUCKET)..."
+	@aws s3 mb s3://$(TEST_BUCKET) --region $(REGION) 2>/dev/null || \
+		echo "Bucket $(TEST_BUCKET) already exists or cannot be created"
+
+# Create DynamoDB table (ignores error if already exists)
 create-table:
-	aws dynamodb create-table \
+	@echo "Creating DynamoDB table $(TEST_TABLE)..."
+	@aws dynamodb create-table \
 		--table-name $(TEST_TABLE) \
 		--attribute-definitions AttributeName=$(TEST_PK_NAME),AttributeType=S \
 		--key-schema AttributeName=$(TEST_PK_NAME),KeyType=HASH \
 		--billing-mode PAY_PER_REQUEST \
-		--region $(REGION)
+		--region $(REGION) 2>/dev/null || \
+		echo "Table $(TEST_TABLE) already exists or cannot be created"
+	@echo "Waiting for table to be active..."
+	@aws dynamodb wait table-exists --table-name $(TEST_TABLE) --region $(REGION) 2>/dev/null || true
 
 # Add test item to DynamoDB
 put-test-item:
-	aws dynamodb put-item \
+	@echo "Adding test item to $(TEST_TABLE)..."
+	@aws dynamodb put-item \
 		--table-name $(TEST_TABLE) \
-		--item '{"$(TEST_PK_NAME)": {"S": "$(TEST_PK_VALUE)"}, "name": {"S": "Test Item"}, "value": {"N": "42"}}' \
+		--item '{"$(TEST_PK_NAME)": {"S": "$(TEST_PK_VALUE)"}, "name": {"S": "Test Item"}, "value": {"N": "42"}, "created": {"S": "$(shell date -Iseconds)"}}' \
 		--region $(REGION)
+	@echo "✅ Test item added"
+
+# Check if resources exist
+check-resources:
+	@echo "=== S3 Bucket ==="
+	@aws s3 ls s3://$(TEST_BUCKET) --region $(REGION) 2>/dev/null && echo "✅ Bucket exists" || echo "❌ Bucket not found"
+	@echo "\n=== DynamoDB Table ==="
+	@aws dynamodb describe-table --table-name $(TEST_TABLE) --region $(REGION) --query 'Table.TableStatus' --output text 2>/dev/null || echo "❌ Table not found"
+	@echo "\n=== Test Item ==="
+	@aws dynamodb get-item --table-name $(TEST_TABLE) --key '{"$(TEST_PK_NAME)": {"S": "$(TEST_PK_VALUE)"}}' --region $(REGION) 2>/dev/null | jq -r '.Item // "❌ Item not found"'
 
 # View CloudWatch logs
 logs:
 	aws logs tail /aws/lambda/$(FUNCTION_NAME) --follow --region $(REGION)
+
+# View recent logs (last 10 minutes)
+logs-recent:
+	aws logs tail /aws/lambda/$(FUNCTION_NAME) --since 10m --region $(REGION)
 
 # ============================================================================
 # Cleanup
@@ -169,6 +227,6 @@ redeploy: release
 	@echo "Deployed $(FUNCTION_NAME) to $(REGION)"
 
 .PHONY: format lint check run build release deploy deploy-with-role \
-        invoke invoke-local invoke-composite invoke-remote \
-        test test-verbose create-bucket create-table put-test-item \
-        logs clean all redeploy
+        invoke invoke-test invoke-efs invoke-composite invoke-remote \
+        test test-verbose setup setup-iam create-bucket create-table put-test-item \
+        check-resources logs logs-recent clean all redeploy
