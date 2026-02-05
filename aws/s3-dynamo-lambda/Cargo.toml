@@ -3,6 +3,14 @@ name = "s3-dynamo-lambda"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "s3_dynamo_lambda"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bootstrap"
+path = "src/main.rs"
+
 [dependencies]
 # AWS Lambda runtime
 lambda_runtime = "1.0.2"

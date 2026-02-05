@@ -9,3 +9,4 @@ data/
 dataframes/jupyter/fruits.csv
 pqfilter/*.parquet
 pqfilter/*.csv
+aws/s3-dynamo-lambda/response.json
