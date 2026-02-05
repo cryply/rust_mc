@@ -6,7 +6,6 @@ use aws_sdk_s3::Client as S3Client;
 use lambda_runtime::{run, service_fn, Error, LambdaEvent};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
 use thiserror::Error;
 use tracing::{error, info};
 
@@ -51,10 +50,10 @@ pub struct Request {
     /// S3 key for the results file
     pub s3_results_key: String,
 
-    /// DynamoDB table name
+    /// `DynamoDB` table name
     pub dynamo_table: String,
 
-    /// Partition key name in DynamoDB
+    /// Partition key name in `DynamoDB`
     pub partition_key_name: String,
 
     /// Partition key value to query
@@ -69,7 +68,22 @@ pub struct Request {
     pub sort_key_value: Option<String>,
 }
 
-/// DynamoDB item representation for serialization
+impl Request {
+    /// Format the `DynamoDB` key as a string for logging/results
+    fn format_key_string(&self) -> String {
+        match (&self.sort_key_name, &self.sort_key_value) {
+            (Some(sk_name), Some(sk_value)) => {
+                format!(
+                    "{}={}, {}={}",
+                    self.partition_key_name, self.partition_key_value, sk_name, sk_value
+                )
+            }
+            _ => format!("{}={}", self.partition_key_name, self.partition_key_value),
+        }
+    }
+}
+
+/// `DynamoDB` item representation for serialization
 #[derive(Serialize, Debug)]
 pub struct DynamoItem {
     pub attributes: HashMap<String, String>,
@@ -109,6 +123,41 @@ pub struct Response {
     pub details: Option<ProcessingResults>,
 }
 
+impl Response {
+    /// Create an error response
+    fn error(request_id: String, message: String) -> Self {
+        Self {
+            request_id,
+            success: false,
+            message,
+            results_s3_location: String::new(),
+            details: None,
+        }
+    }
+
+    /// Create an error response with partial results
+    fn error_with_details(request_id: String, message: String, details: ProcessingResults) -> Self {
+        Self {
+            request_id,
+            success: false,
+            message,
+            results_s3_location: String::new(),
+            details: Some(details),
+        }
+    }
+
+    /// Create a success response
+    fn success(request_id: String, results_location: String, details: ProcessingResults) -> Self {
+        Self {
+            request_id,
+            success: true,
+            message: "CSV uploaded, DynamoDB queried, results saved to S3".to_string(),
+            results_s3_location: results_location,
+            details: Some(details),
+        }
+    }
+}
+
 // ============================================================================
 // AWS Client Initialization
 // ============================================================================
@@ -138,8 +187,8 @@ async fn upload_csv_to_s3(
 
     // Read file contents
     let file_bytes = tokio::fs::read(file_path).await.map_err(|e| {
-        error!("Failed to read file {}: {}", file_path, e);
-        LambdaError::FileRead(format!("{}: {}", file_path, e))
+        error!("Failed to read file {file_path}: {e}");
+        LambdaError::FileRead(format!("{file_path}: {e}"))
     })?;
 
     let file_size = file_bytes.len() as u64;
@@ -203,15 +252,14 @@ async fn save_results_to_s3(
 // DynamoDB Operations
 // ============================================================================
 
-/// Convert DynamoDB AttributeValue to a simple string representation
+/// Convert `DynamoDB` `AttributeValue` to a simple string representation
 fn attribute_to_string(attr: &AttributeValue) -> String {
     match attr {
         AttributeValue::S(s) => s.clone(),
         AttributeValue::N(n) => n.clone(),
         AttributeValue::Bool(b) => b.to_string(),
         AttributeValue::Null(_) => "null".to_string(),
-        AttributeValue::Ss(list) => format!("[{}]", list.join(", ")),
-        AttributeValue::Ns(list) => format!("[{}]", list.join(", ")),
+        AttributeValue::Ss(list) | AttributeValue::Ns(list) => format!("[{}]", list.join(", ")),
         AttributeValue::L(list) => {
             let items: Vec<String> = list.iter().map(attribute_to_string).collect();
             format!("[{}]", items.join(", "))
@@ -229,7 +277,7 @@ fn attribute_to_string(attr: &AttributeValue) -> String {
     }
 }
 
-/// Query a single item from DynamoDB using GetItem
+/// Query a single item from `DynamoDB` using `GetItem`
 async fn query_dynamo_item(
     dynamo_client: &DynamoClient,
     table_name: &str,
@@ -260,21 +308,67 @@ async fn query_dynamo_item(
     })?;
 
     // Convert result to our DynamoItem type
-    match result.item {
-        Some(item) => {
-            info!("Item found with {} attributes", item.len());
-            let attributes: HashMap<String, String> = item
-                .iter()
-                .map(|(k, v)| (k.clone(), attribute_to_string(v)))
-                .collect();
+    if let Some(item) = result.item {
+        info!("Item found with {} attributes", item.len());
+        let attributes: HashMap<String, String> = item
+            .iter()
+            .map(|(k, v)| (k.clone(), attribute_to_string(v)))
+            .collect();
 
-            Ok(Some(DynamoItem { attributes }))
-        }
-        None => {
-            info!("No item found for key {}={}", pk_name, pk_value);
-            Ok(None)
-        }
+        Ok(Some(DynamoItem { attributes }))
+    } else {
+        info!("No item found for key {}={}", pk_name, pk_value);
+        Ok(None)
     }
+}
+
+// ============================================================================
+// Lambda Handler - Step Functions
+// ============================================================================
+
+/// Step 1: Upload CSV to S3 and build result
+async fn step_upload_csv(
+    s3_client: &S3Client,
+    payload: &Request,
+) -> Result<CsvUploadResult, String> {
+    upload_csv_to_s3(
+        s3_client,
+        &payload.csv_file_path,
+        &payload.s3_bucket,
+        &payload.s3_csv_key,
+    )
+    .await
+    .map(|size| CsvUploadResult {
+        bucket: payload.s3_bucket.clone(),
+        key: payload.s3_csv_key.clone(),
+        size_bytes: size,
+        success: true,
+    })
+    .map_err(|e| e.to_string())
+}
+
+/// Step 2: Query `DynamoDB` and build result
+async fn step_query_dynamo(
+    dynamo_client: &DynamoClient,
+    payload: &Request,
+) -> Result<DynamoQueryResult, String> {
+    let item = query_dynamo_item(
+        dynamo_client,
+        &payload.dynamo_table,
+        &payload.partition_key_name,
+        &payload.partition_key_value,
+        payload.sort_key_name.as_deref(),
+        payload.sort_key_value.as_deref(),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(DynamoQueryResult {
+        table: payload.dynamo_table.clone(),
+        key_queried: payload.format_key_string(),
+        item_found: item.is_some(),
+        item,
+    })
 }
 
 // ============================================================================
@@ -290,86 +384,37 @@ async fn function_handler(event: LambdaEvent<Request>) -> Result<Response, Error
     info!("S3 bucket: {}", payload.s3_bucket);
     info!("DynamoDB table: {}", payload.dynamo_table);
 
-    // Initialize AWS clients
     let (s3_client, dynamo_client) = init_aws_clients().await;
 
     // Step 1: Upload CSV to S3
-    let csv_upload_result = match upload_csv_to_s3(
-        &s3_client,
-        &payload.csv_file_path,
-        &payload.s3_bucket,
-        &payload.s3_csv_key,
-    )
-    .await
-    {
-        Ok(size) => CsvUploadResult {
-            bucket: payload.s3_bucket.clone(),
-            key: payload.s3_csv_key.clone(),
-            size_bytes: size,
-            success: true,
-        },
+    let csv_upload_result = match step_upload_csv(&s3_client, &payload).await {
+        Ok(result) => result,
         Err(e) => {
-            error!("CSV upload failed: {}", e);
-            return Ok(Response {
+            error!("CSV upload failed: {e}");
+            return Ok(Response::error(
                 request_id,
-                success: false,
-                message: format!("CSV upload failed: {}", e),
-                results_s3_location: String::new(),
-                details: None,
-            });
+                format!("CSV upload failed: {e}"),
+            ));
         }
     };
 
     // Step 2: Query DynamoDB
-    let dynamo_result = match query_dynamo_item(
-        &dynamo_client,
-        &payload.dynamo_table,
-        &payload.partition_key_name,
-        &payload.partition_key_value,
-        payload.sort_key_name.as_deref(),
-        payload.sort_key_value.as_deref(),
-    )
-    .await
-    {
-        Ok(item) => {
-            let key_str = match (&payload.sort_key_name, &payload.sort_key_value) {
-                (Some(sk_name), Some(sk_value)) => {
-                    format!(
-                        "{}={}, {}={}",
-                        payload.partition_key_name, payload.partition_key_value, sk_name, sk_value
-                    )
-                }
-                _ => format!(
-                    "{}={}",
-                    payload.partition_key_name, payload.partition_key_value
-                ),
-            };
-
-            DynamoQueryResult {
-                table: payload.dynamo_table.clone(),
-                key_queried: key_str,
-                item_found: item.is_some(),
-                item,
-            }
-        }
+    let dynamo_result = match step_query_dynamo(&dynamo_client, &payload).await {
+        Ok(result) => result,
         Err(e) => {
-            error!("DynamoDB query failed: {}", e);
-            return Ok(Response {
+            error!("DynamoDB query failed: {e}");
+            return Ok(Response::error(
                 request_id,
-                success: false,
-                message: format!("DynamoDB query failed: {}", e),
-                results_s3_location: String::new(),
-                details: None,
-            });
+                format!("DynamoDB query failed: {e}"),
+            ));
         }
     };
 
     // Step 3: Combine results and save to S3
-    let timestamp = chrono::Utc::now().to_rfc3339();
     let processing_results = ProcessingResults {
         csv_upload: csv_upload_result,
         dynamo_query: dynamo_result,
-        timestamp: timestamp.clone(),
+        timestamp: chrono::Utc::now().to_rfc3339(),
     };
 
     let results_location = format!("s3://{}/{}", payload.s3_bucket, payload.s3_results_key);
@@ -382,25 +427,20 @@ async fn function_handler(event: LambdaEvent<Request>) -> Result<Response, Error
     )
     .await
     {
-        error!("Failed to save results: {}", e);
-        return Ok(Response {
+        error!("Failed to save results: {e}");
+        return Ok(Response::error_with_details(
             request_id,
-            success: false,
-            message: format!("Failed to save results to S3: {}", e),
-            results_s3_location: String::new(),
-            details: Some(processing_results),
-        });
+            format!("Failed to save results to S3: {e}"),
+            processing_results,
+        ));
     }
 
     info!("All operations completed successfully");
-
-    Ok(Response {
+    Ok(Response::success(
         request_id,
-        success: true,
-        message: "CSV uploaded, DynamoDB queried, results saved to S3".to_string(),
-        results_s3_location: results_location,
-        details: Some(processing_results),
-    })
+        results_location,
+        processing_results,
+    ))
 }
 
 // ============================================================================
@@ -487,5 +527,37 @@ mod tests {
         let request: Request = serde_json::from_str(json).unwrap();
         assert_eq!(request.sort_key_name, Some("sk".to_string()));
         assert_eq!(request.sort_key_value, Some("order456".to_string()));
+    }
+
+    #[test]
+    fn test_format_key_string_simple() {
+        let request = Request {
+            csv_file_path: String::new(),
+            s3_bucket: String::new(),
+            s3_csv_key: String::new(),
+            s3_results_key: String::new(),
+            dynamo_table: String::new(),
+            partition_key_name: "pk".to_string(),
+            partition_key_value: "user123".to_string(),
+            sort_key_name: None,
+            sort_key_value: None,
+        };
+        assert_eq!(request.format_key_string(), "pk=user123");
+    }
+
+    #[test]
+    fn test_format_key_string_composite() {
+        let request = Request {
+            csv_file_path: String::new(),
+            s3_bucket: String::new(),
+            s3_csv_key: String::new(),
+            s3_results_key: String::new(),
+            dynamo_table: String::new(),
+            partition_key_name: "pk".to_string(),
+            partition_key_value: "user123".to_string(),
+            sort_key_name: Some("sk".to_string()),
+            sort_key_value: Some("order456".to_string()),
+        };
+        assert_eq!(request.format_key_string(), "pk=user123, sk=order456");
     }
 }
