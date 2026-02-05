@@ -18,9 +18,6 @@ pub enum LambdaError {
     #[error("S3 upload failed: {0}")]
     S3Upload(String),
 
-    #[error("S3 download failed: {0}")]
-    S3Download(String),
-
     #[error("DynamoDB query failed: {0}")]
     DynamoQuery(String),
 
@@ -74,6 +71,7 @@ pub struct Request {
 
 impl Request {
     /// Format the `DynamoDB` key as a string for logging/results
+    #[must_use]
     pub fn format_key_string(&self) -> String {
         match (&self.sort_key_name, &self.sort_key_value) {
             (Some(sk_name), Some(sk_value)) => {
@@ -129,6 +127,7 @@ pub struct Response {
 
 impl Response {
     /// Create an error response
+    #[must_use]
     pub fn error(request_id: String, message: String) -> Self {
         Self {
             request_id,
@@ -140,6 +139,7 @@ impl Response {
     }
 
     /// Create an error response with partial results
+    #[must_use]
     pub fn error_with_details(
         request_id: String,
         message: String,
@@ -155,7 +155,12 @@ impl Response {
     }
 
     /// Create a success response
-    pub fn success(request_id: String, results_location: String, details: ProcessingResults) -> Self {
+    #[must_use]
+    pub fn success(
+        request_id: String,
+        results_location: String,
+        details: ProcessingResults,
+    ) -> Self {
         Self {
             request_id,
             success: true,
@@ -185,6 +190,9 @@ pub async fn init_aws_clients() -> (S3Client, DynamoClient) {
 // ============================================================================
 
 /// Create a test CSV file for testing purposes
+///
+/// # Errors
+/// Returns `LambdaError::FileRead` if the file cannot be written
 pub async fn create_test_csv(file_path: &str) -> Result<(), LambdaError> {
     info!("Creating test CSV file at {}", file_path);
 
@@ -200,6 +208,10 @@ pub async fn create_test_csv(file_path: &str) -> Result<(), LambdaError> {
 }
 
 /// Upload a local file to S3
+///
+/// # Errors
+/// Returns `LambdaError::FileRead` if the file cannot be read,
+/// or `LambdaError::S3Upload` if the upload fails
 pub async fn upload_csv_to_s3(
     s3_client: &S3Client,
     file_path: &str,
@@ -239,6 +251,10 @@ pub async fn upload_csv_to_s3(
 }
 
 /// Upload results JSON to S3
+///
+/// # Errors
+/// Returns `LambdaError::Serialization` if JSON serialization fails,
+/// or `LambdaError::S3Upload` if the upload fails
 pub async fn save_results_to_s3(
     s3_client: &S3Client,
     results: &ProcessingResults,
@@ -301,6 +317,9 @@ pub fn attribute_to_string(attr: &AttributeValue) -> String {
 }
 
 /// Query a single item from `DynamoDB` using `GetItem`
+///
+/// # Errors
+/// Returns `LambdaError::DynamoQuery` if the query fails
 pub async fn query_dynamo_item(
     dynamo_client: &DynamoClient,
     table_name: &str,
@@ -350,6 +369,9 @@ pub async fn query_dynamo_item(
 // ============================================================================
 
 /// Step 1: Upload CSV to S3 and build result
+///
+/// # Errors
+/// Returns error string if upload fails
 pub async fn step_upload_csv(
     s3_client: &S3Client,
     payload: &Request,
@@ -371,6 +393,9 @@ pub async fn step_upload_csv(
 }
 
 /// Step 2: Query `DynamoDB` and build result
+///
+/// # Errors
+/// Returns error string if query fails
 pub async fn step_query_dynamo(
     dynamo_client: &DynamoClient,
     payload: &Request,
@@ -398,6 +423,10 @@ pub async fn step_query_dynamo(
 // Lambda Handler
 // ============================================================================
 
+/// Main Lambda handler function
+///
+/// # Errors
+/// Returns `lambda_runtime::Error` if an unrecoverable error occurs
 pub async fn function_handler(event: LambdaEvent<Request>) -> Result<Response, Error> {
     let request_id = event.context.request_id.clone();
     let payload = event.payload;
@@ -425,7 +454,10 @@ pub async fn function_handler(event: LambdaEvent<Request>) -> Result<Response, E
         Ok(result) => result,
         Err(e) => {
             error!("CSV upload failed: {e}");
-            return Ok(Response::error(request_id, format!("CSV upload failed: {e}")));
+            return Ok(Response::error(
+                request_id,
+                format!("CSV upload failed: {e}"),
+            ));
         }
     };
 
