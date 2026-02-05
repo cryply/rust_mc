@@ -98,17 +98,6 @@ invoke-efs:
 	@echo "\n=== Response ==="
 	@cat response.json | jq .
 
-# Create a test CSV on EFS (run this first if using invoke-efs)
-create-test-csv:
-	@echo "Creating test CSV on EFS via Lambda..."
-	aws lambda invoke \
-		--function-name efs-lister \
-		--payload '{"name": "create-csv"}' \
-		--cli-binary-format raw-in-base64-out \
-		--region $(REGION) \
-		response.json
-	@echo "Note: You may need a helper Lambda or direct EFS access to create the test file"
-
 # Invoke with sort key
 invoke-composite:
 	aws lambda invoke \
