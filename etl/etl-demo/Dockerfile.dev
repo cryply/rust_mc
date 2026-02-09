@@ -1,0 +1,26 @@
+# syntax=docker/dockerfile:1
+
+# Development Dockerfile with cargo-watch for hot reload
+FROM rust:1.83-slim-bookworm AS dev
+
+WORKDIR /app
+
+# Install development tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install cargo-watch for hot reload
+RUN cargo install cargo-watch
+
+# Copy manifests
+COPY Cargo.toml Cargo.lock* ./
+
+# Create dummy main to cache dependencies
+RUN mkdir src && \
+    echo "fn main() {}" > src/main.rs && \
+    cargo build && \
+    rm -rf src
+
+# Source will be mounted as volume
+CMD ["cargo", "watch", "-x", "run"]

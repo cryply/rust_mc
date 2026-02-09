@@ -1,18 +1,13 @@
-use log::{error, info, warn};
+use log::{info, warn};
 
-use csv::{ReaderBuilder, Writer};
+use csv::Writer;
 use serde::Serialize;
-use std::{error::Error, io, process, thread::AccessError,
-    fs::{File}
-};
-
-
-// ETL Example
-
+use std::error::Error;
+use std::path::Path;
 
 #[derive(Debug, thiserror::Error)]
 enum EtlError {
-    #[error("Invalid data point: id={0}, reason{1}")]
+    #[error("Invalid data point: id={0}, reason: {1}")]
     InvalidData(u32, String),
 }
 
@@ -28,42 +23,51 @@ struct CleanData {
     value: i32,
 }
 
-fn total_value(data: Vec<CleanData>) -> f64 {
-    data.into_iter().fold(0.0, |acc, p| acc + p.value as f64)
+fn total_value(data: &[CleanData]) -> f64 {
+    data.iter().fold(0.0, |acc, p| acc + p.value as f64)
 }
 
 fn main() {
     env_logger::init();
-    let raw = vec![RawData { id: 1, value: 1000 }, RawData { id: 2, value: -5 }];
+    
+    info!("Starting ETL process");
+    
+    let raw = vec![
+        RawData { id: 1, value: 1000 },
+        RawData { id: 2, value: -5 },
+        RawData { id: 3, value: 50 },
+        RawData { id: 4, value: 75 },
+    ];
 
+    info!("Extracted {} raw records", raw.len());
+    
     let cleaned = transform(extract(raw));
 
-    println!(
-        "Clean Data: Id - {:?} Value - {:?}",
-        cleaned[0].id, cleaned[0].value
-    ); // Accessing the fields
-
-    println!("{:?}", cleaned);
-
-    summary(cleaned.clone());
-
-    load(cleaned);
-}
-
-fn summary(data: Vec<CleanData>) {
-    let total: f64 = total_value(data.clone());
-    let mean: f64 = total / data.len() as f64;
-    println!("Total: {total} Mean: {mean}");
+    info!("Transformed to {} clean records", cleaned.len());
     
+    summary(&cleaned);
+
+    if let Err(e) = load(&cleaned) {
+        log::error!("Failed to load data: {e}");
+        std::process::exit(1);
+    }
+    
+    info!("ETL process completed successfully");
 }
 
+fn summary(data: &[CleanData]) {
+    let total = total_value(data);
+    let mean = total / data.len() as f64;
+    info!("Summary - Total: {total}, Mean: {mean:.2}, Count: {}", data.len());
+}
 
-fn write_data(filename: String, data: Vec<CleanData>) -> Result<(), Box<dyn Error>> {
+fn write_data(filename: &str, data: &[CleanData]) -> Result<(), Box<dyn Error>> {
     let mut wrt = Writer::from_path(filename)?;
     for el in data {
         wrt.serialize(el)?;
     }
-    wrt.flush();
+    wrt.flush()?;
+    info!("Wrote {} records to {}", data.len(), filename);
     Ok(())
 }
 
@@ -71,34 +75,39 @@ fn extract(raw: Vec<RawData>) -> Vec<RawData> {
     raw
 }
 
-
-// Perform ETL process
 fn transform(raw: Vec<RawData>) -> Vec<CleanData> {
     raw.into_iter()
-        .map(|r| {
-
+        .filter_map(|r| {
             if r.id == 0 {
-
+                warn!("Skipping record with id=0");
+                return None;
             }
 
-            let ov = r.value;
+            let original_value = r.value;
             let clamped = r.value.clamp(0, 100);
 
-            if clamped != ov {
-                warn!("Value clamped {ov} -> {clamped}");
+            if clamped != original_value {
+                warn!("Value clamped for id={}: {} -> {}", r.id, original_value, clamped);
             }
 
-            CleanData {
+            Some(CleanData {
                 id: r.id,
                 value: clamped,
-            }
+            })
         })
         .collect()
 }
 
-
-fn load(data: Vec<CleanData>) -> Result<(), Box<dyn Error>> {
-    write_data("1.csv".to_string(), data);
+fn load(data: &[CleanData]) -> Result<(), Box<dyn Error>> {
+    // Use /data directory for output (mounted volume in Docker)
+    let output_dir = if Path::new("/data").exists() {
+        "/data"
+    } else {
+        "."
+    };
+    
+    let filename = format!("{}/output.csv", output_dir);
+    write_data(&filename, data)?;
     Ok(())
 }
 
@@ -119,21 +128,32 @@ mod tests {
         let cleaned = transform(extract(raw));
         assert_eq!(cleaned[0].value, 0);
     }
-    
+
     #[test]
     fn test_no_clamp_needed() {
         let raw = vec![RawData { id: 1, value: 50 }];
         let cleaned = transform(extract(raw));
         assert_eq!(cleaned[0].value, 50);
     }
-    
+
     #[test]
     fn test_summary_calculation() {
         let data = vec![
             CleanData { id: 1, value: 100 },
             CleanData { id: 2, value: 0 },
         ];
-        let total = total_value(data.clone());
+        let total = total_value(&data);
         assert_eq!(total, 100.0);
+    }
+    
+    #[test]
+    fn test_skip_zero_id() {
+        let raw = vec![
+            RawData { id: 0, value: 50 },
+            RawData { id: 1, value: 50 },
+        ];
+        let cleaned = transform(extract(raw));
+        assert_eq!(cleaned.len(), 1);
+        assert_eq!(cleaned[0].id, 1);
     }
 }

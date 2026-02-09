@@ -1,12 +1,11 @@
 [package]
-name = "etl-demo"
+name = "etl-processor"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
-log = "0.4.29"
-env_logger = "0.11"
 csv = "1.4.0"
-
+env_logger = "0.11.8"
+log = "0.4.29"
 serde = { version = "1.0.228", features = ["derive"] }
 thiserror = "2.0.18"

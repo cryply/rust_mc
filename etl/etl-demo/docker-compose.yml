@@ -1,0 +1,36 @@
+services:
+  etl-processor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: etl-processor
+    environment:
+      - RUST_LOG=info
+    volumes:
+      # Mount local data directory for input/output
+      - ./data:/data
+    # Run once and exit (typical ETL behavior)
+    # Remove restart policy for one-shot jobs
+    
+  # Development service with hot reload support
+  etl-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      target: dev
+    container_name: etl-dev
+    environment:
+      - RUST_LOG=debug
+      - CARGO_TARGET_DIR=/app/target
+    volumes:
+      - ./src:/app/src:ro
+      - ./Cargo.toml:/app/Cargo.toml:ro
+      - ./data:/data
+      - cargo-cache:/usr/local/cargo/registry
+      - target-cache:/app/target
+    profiles:
+      - dev
+
+volumes:
+  cargo-cache:
+  target-cache:
