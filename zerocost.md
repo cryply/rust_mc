@@ -126,17 +126,17 @@ Anonymous pipes (1.87)
 Let chains (1.88) 	
 Naked functions (1.88)
 
- This Week in Rust, официальный блог Rust, аккаунт Rust в Bluesky и т.д.)
+ This Week in Rust, Official  Rust blog, account Rust in  Bluesky 
 
-Обсуждаю проект Rust в официальном чате (Zulip или Discord
+Discuss Rust in official Zulip or Discord
 
-Открываю issue в любом репозитории организации rust-lang на GitHub
+Open issue in any repo of  rust-lang на GitHub
 
 
 users.rust-lang.org, internals.rust-lang.org, официальный сервер Rust Discord или Rust Zulip
 
  reddit.com/r/rust, Hacker News, Rust Community Discord, 
 
-конференции, посвящённой Rust
+Rust Conference
 
 
