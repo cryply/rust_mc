@@ -1,0 +1,5 @@
+services:
+  crypto-sentiment:
+    build: .
+    env_file:
+      - .env
