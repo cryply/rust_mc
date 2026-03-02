@@ -12,20 +12,6 @@ pub struct Analysis {
     pub eth: SentimentScore,
 }
 
-/// Check if text mentions BTC/Bitcoin (case-insensitive).
-pub fn mentions_btc(text: &str) -> bool {
-    let lower = text.to_lowercase();
-    lower.contains("btc") || lower.contains("bitcoin")
-}
-
-/// Check if text mentions ETH/Ethereum (case-insensitive).
-pub fn mentions_eth(text: &str) -> bool {
-    let lower = text.to_lowercase();
-    lower.contains("eth") || lower.contains("ethereum")
-}
-
-/// Build a TweetAnalysis from tweet data and sentiment score.
-/// Returns None if the tweet mentions neither BTC nor ETH.
 pub fn build_analysis(text: &str, sentiment: f64) -> Analysis {
     Analysis {
         text: text.to_string(),
@@ -38,22 +24,7 @@ pub fn build_analysis(text: &str, sentiment: f64) -> Analysis {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_mentions_btc() {
-        assert!(mentions_btc("BTC is up"));
-        assert!(mentions_btc("bitcoin breaking out"));
-        assert!(mentions_btc("I love BITCOIN"));
-        assert!(!mentions_btc("Ethereum is cool"));
-    }
-
-    #[test]
-    fn test_mentions_eth() {
-        assert!(mentions_eth("ETH looking strong"));
-        assert!(mentions_eth("Ethereum merge complete"));
-        assert!(!mentions_eth("BTC only"));
-    }
-
-    #[test]
+#[test]
     fn test_build_analysis_always_has_both() {
         let a = build_analysis("BTC pumping hard", 0.72);
         assert!((a.btc.sentiment - 0.72).abs() < 1e-9);
