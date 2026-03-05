@@ -1,92 +1,77 @@
 use serde::Deserialize;
 
-pub struct SentimentClient {
+pub struct OllamaClient {
     http: reqwest::Client,
-    api_token: String,
+    base_url: String,
+    model: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct HfLabel {
-    label: String,
-    score: f64,
+#[derive(Deserialize)]
+struct OllamaResponse {
+    response: String,
 }
 
-impl SentimentClient {
-    pub fn new(api_token: &str) -> Self {
+impl OllamaClient {
+    pub fn new(base_url: &str) -> Self {
         Self {
             http: reqwest::Client::new(),
-            api_token: api_token.to_string(),
+            base_url: base_url.to_string(),
+            model: "qwen2.5:7b".to_string(),
         }
     }
 
-    /// Call ProsusAI/finbert via HuggingFace Inference API.
-    /// Returns a score in [-1.0, 1.0] where positive_prob - negative_prob.
-    pub async fn analyze(&self, text: &str) -> anyhow::Result<f64> {
-        let url = "https://router.huggingface.co/hf-inference/models/ProsusAI/finbert";
+    /// Score sentiment for a specific asset in the given text.
+    /// Returns a score in [-1.0, 1.0]: -1 very bearish, +1 very bullish.
+    pub async fn analyze_for_asset(&self, text: &str, asset: &str) -> anyhow::Result<f64> {
+        let prompt = format!(
+            "You are a crypto financial analyst. \
+            Rate the sentiment towards {asset} in the news headline below. \
+            Reply with ONLY a single decimal number from -1.0 (very bearish) to 1.0 (very bullish). \
+            No explanation, no units, just the number.\n\
+            Headline: {text}"
+        );
 
-        let payload = serde_json::json!({ "inputs": text });
+        let payload = serde_json::json!({
+            "model": self.model,
+            "prompt": prompt,
+            "stream": false,
+            "options": { "temperature": 0 }
+        });
+
         let resp = self
             .http
-            .post(url)
-            .bearer_auth(&self.api_token)
+            .post(format!("{}/api/generate", self.base_url))
             .json(&payload)
             .send()
             .await?;
 
-        let body = resp.text().await?;
-        // HF returns [[{label, score}, ...]] — outer array per input
-        let outer: Vec<Vec<HfLabel>> = serde_json::from_str(&body)
-            .map_err(|e| anyhow::anyhow!("HF API response parse error: {e}\nbody: {body}"))?;
+        let body: OllamaResponse = resp.json().await?;
+        let score: f64 = body.response.trim().parse().map_err(|_| {
+            anyhow::anyhow!("Failed to parse score from model output: {:?}", body.response)
+        })?;
 
-        let labels = outer
-            .into_iter()
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("empty HF response"))?;
-
-        let mut positive = 0.0_f64;
-        let mut negative = 0.0_f64;
-
-        for item in &labels {
-            match item.label.to_lowercase().as_str() {
-                "positive" => positive = item.score,
-                "negative" => negative = item.score,
-                _ => {}
-            }
-        }
-
-        Ok(positive - negative)
+        Ok(score.clamp(-1.0, 1.0))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    fn compute_score(positive: f64, negative: f64) -> f64 {
-        positive - negative
+    #[test]
+    fn test_clamp_overflow() {
+        let score = 1.5_f64.clamp(-1.0, 1.0);
+        assert_eq!(score, 1.0);
     }
 
     #[test]
-    fn test_score_positive() {
-        let score = compute_score(0.85, 0.05);
-        assert!((score - 0.80).abs() < 1e-9);
-        assert!(score > 0.0);
+    fn test_clamp_underflow() {
+        let score = (-1.5_f64).clamp(-1.0, 1.0);
+        assert_eq!(score, -1.0);
     }
 
     #[test]
-    fn test_score_negative() {
-        let score = compute_score(0.1, 0.8);
-        assert!((score - (-0.7)).abs() < 1e-9);
-        assert!(score < 0.0);
-    }
-
-    #[test]
-    fn test_score_neutral() {
-        let score = compute_score(0.33, 0.33);
-        assert!(score.abs() < 1e-9);
-    }
-
-    #[test]
-    fn test_score_bounds() {
-        assert!((compute_score(1.0, 0.0) - 1.0).abs() < 1e-9);
-        assert!((compute_score(0.0, 1.0) - (-1.0)).abs() < 1e-9);
+    fn test_parse_valid_score() {
+        let raw = " -0.75 ";
+        let score: f64 = raw.trim().parse().unwrap();
+        assert!((score - (-0.75)).abs() < 1e-9);
     }
 }

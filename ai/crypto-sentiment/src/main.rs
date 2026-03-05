@@ -4,9 +4,9 @@ mod sentiment;
 use clap::Parser;
 
 #[derive(Parser)]
-#[command(name = "crypto-sentiment", about = "Crypto tweet sentiment analyzer")]
+#[command(name = "crypto-sentiment", about = "Crypto news sentiment analyzer (Qwen via Ollama)")]
 struct Args {
-    /// Text to analyze
+    /// News headline or text to analyze
     text: String,
 }
 
@@ -15,14 +15,17 @@ async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
 
     let args = Args::parse();
-    let hf_token = std::env::var("HF_API_TOKEN")
-        .expect("HF_API_TOKEN must be set in .env or environment");
+    let ollama_url = std::env::var("OLLAMA_URL")
+        .unwrap_or_else(|_| "http://localhost:11434".to_string());
 
-    let sentiment_client = sentiment::SentimentClient::new(&hf_token);
+    let client = sentiment::OllamaClient::new(&ollama_url);
 
-    let score = sentiment_client.analyze(&args.text).await?;
+    let (btc_score, eth_score) = tokio::try_join!(
+        client.analyze_for_asset(&args.text, "Bitcoin"),
+        client.analyze_for_asset(&args.text, "Ethereum"),
+    )?;
 
-    let result = analysis::build_analysis(&args.text, score);
+    let result = analysis::build_analysis(&args.text, btc_score, eth_score);
     let json = serde_json::to_string_pretty(&result)?;
     println!("{json}");
 
