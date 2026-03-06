@@ -23,7 +23,6 @@
 * - Prints timing metrics for simulation
 */
 
-
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -52,17 +51,16 @@ impl Philosopher {
     }
 
     fn eat(&self) {
-        let (first_fork, second_fork) = if self.id % 2 == 0 {
+        let (first_fork, second_fork) = if self.id.is_multiple_of(2) {
             (&self.left_fork, &self.right_fork)
         } else {
             (&self.right_fork, &self.left_fork)
         };
 
-        let _first_guard = first_fork.rx.clone().lock().unwrap().recv().unwrap();
-        
+        first_fork.rx.clone().lock().unwrap().recv().unwrap();
 
         println!("{} picked up fork {}.", self.name, first_fork.id);
-        let _second_guard = second_fork.rx.clone().lock().unwrap().recv().unwrap();
+        second_fork.rx.clone().lock().unwrap().recv().unwrap();
         println!("{} picked up fork {}.", self.name, second_fork.id);
 
         println!("{} is eating.", self.name);
@@ -82,11 +80,11 @@ fn main() {
     //we only have 4 forks at the table
     let forks = (0..4)
         .map(|id| {
-            let (tx, rx)= mpsc::channel::<()>();
+            let (tx, rx) = mpsc::channel::<()>();
             let _ = tx.send(());
             Arc::new(Fork {
                 id,
-                tx: tx,
+                tx,
                 rx: Arc::new(Mutex::new(rx)),
             })
         })
@@ -112,7 +110,6 @@ fn main() {
     .into_iter()
     .enumerate()
     .map(move |(id, (name, left, right))| {
-
         Philosopher::new(
             id as u32,
             name,
