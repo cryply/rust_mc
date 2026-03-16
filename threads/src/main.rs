@@ -43,6 +43,8 @@ fn arc_demo() {
 
     let data = Arc::new(5);
 
+    // Ar cprovides RO access. Use Arc<Mutex> for internal mutability, See below.
+
     for _ in 0..5 {
         let data_shared = data.clone();
         thread::spawn(move || {
@@ -80,6 +82,7 @@ fn arc_demo() {
     {
         let mut num = counter_clone.lock().unwrap();
         *num += 123;
+        // counter_clone.lock().unwrap() += 123;
     }
 
     let value = *counter.lock().unwrap();
